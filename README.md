@@ -1,28 +1,42 @@
 # webview
 
 [![Join the chat at https://gitter.im/zserge/webview](https://badges.gitter.im/zserge/webview.svg)](https://gitter.im/zserge/webview?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-[![Build Status](https://img.shields.io/github/workflow/status/zserge/webview/CI%20Pipeline)](https://github.com/zserge/webview)
-[![GoDoc](https://godoc.org/github.com/zserge/webview?status.svg)](https://godoc.org/github.com/zserge/webview)
-[![Go Report Card](https://goreportcard.com/badge/github.com/zserge/webview)](https://goreportcard.com/report/github.com/zserge/webview)
+[![Build Status](https://img.shields.io/github/workflow/status/webview/webview/CI%20Pipeline)](https://github.com/webview/webview)
+[![GoDoc](https://godoc.org/github.com/webview/webview?status.svg)](https://godoc.org/github.com/webview/webview)
+[![Go Report Card](https://goreportcard.com/badge/github.com/webview/webview)](https://goreportcard.com/report/github.com/webview/webview)
 
+A tiny cross-platform webview library for C/C++/Go to build modern cross-platform GUIs.
 
-A tiny cross-platform webview library for C/C++/Golang to build modern cross-platform GUIs. Also, there are [Rust bindings](https://github.com/Boscop/webview-rs), [Python bindings](https://github.com/zserge/webview-python), [Nim bindings](https://github.com/oskca/webview), [Haskell](https://github.com/lettier/webviewhs), [C# bindings](https://github.com/webview/webview_csharp) and [Java bindings](https://github.com/shannah/webviewjar) available.
-
-The goal of the project is to create a common HTML5 UI abstraction layer for the most widely used platforms. 
+The goal of the project is to create a common HTML5 UI abstraction layer for the most widely used platforms.
 
 It supports two-way JavaScript bindings (to call JavaScript from C/C++/Go and to call C/C++/Go from JavaScript).
 
 It uses Cocoa/WebKit on macOS, gtk-webkit2 on Linux and Edge on Windows 10.
 
-## Webview for Go developers
+## Bindings
 
-If you are interested in writing Webview apps in C/C++, [skip to the next section](#webview-for-cc-developers).
+This repository contains bindings for C, C++, and Go. Bindings for other languages are maintained separately.
+
+* [Rust](https://github.com/Boscop/webview-rs)
+* [Python](https://github.com/zserge/webview-python)
+* [Nim](https://github.com/oskca/webview)
+* [Haskell](https://github.com/lettier/webviewhs)
+* [C#](https://github.com/webview/webview_csharp)
+* [Janet](https://github.com/janet-lang/webview)
+* [Crystal](https://github.com/naqvis/webview)
+* [Java](https://github.com/shannah/webviewjar)
+* [Ruby](https://github.com/Maaarcocr/webview_ruby)
+* [Pascal](http://github.com/PierceNg/fpwebview)
+
+Instructions for [Go](#webview-for-go-developers) and [C/C++](#webview-for-cc-developers) are included below.
+
+## Webview for Go developers
 
 ### Getting started
 
-Install Webview library with `go get`:
+Install this library with `go get`:
 
-```
+```sh
 $ go get github.com/webview/webview
 ```
 
@@ -44,9 +58,9 @@ func main() {
 }
 ```
 
-To build the app use the following commands:
+Build the app:
 
-```bash
+```sh
 # Linux
 $ go build -o webview-example && ./webview-example
 
@@ -61,11 +75,11 @@ $ open example.app # Or click on the app in Finder
 $ go build -ldflags="-H windowsgui" -o webview-example.exe
 ```
 
-For more details see [godoc](https://godoc.org/github.com/zserge/webview).
+For more details see [godoc](https://godoc.org/github.com/webview/webview).
 
 ### Distributing webview apps
 
-On Linux you get a standalone executable. It will depend on GTK3 and GtkWebkit2, so if you distribute your app in DEB or RPM format include those dependencies. An application icon can be specified by providing a `.desktop` file.
+On Linux you get a standalone executable. It depends on GTK3 and GtkWebkit2. Include those dependencies if you distribute in a package like DEB or RPM. An application icon can be specified by providing a `.desktop` file.
 
 On MacOS you are likely to ship an app bundle. Make the following directory structure and just zip it:
 
@@ -79,11 +93,25 @@ example.app
         └── example.icns
 ```
 
-Here, `Info.plist` is a [property list file](https://developer.apple.com/library/content/documentation/General/Reference/InfoPlistKeyReference/Articles/AboutInformationPropertyListFiles.html) and `*.icns` is a special icon format. You may convert PNG to icns [online](https://iconverticons.com/online/).
+Here, `Info.plist` is a [property list file](https://developer.apple.com/library/content/documentation/General/Reference/InfoPlistKeyReference/Articles/AboutInformationPropertyListFiles.html) and `*.icns` is a special icon format. You can convert PNG to icns [online](https://iconverticons.com/online/) or with a tool like `icnsutils`.
 
-On Windows you probably would like to have a custom icon for your executable. It can be done by providing a resource file, compiling it and linking with it. Typically, `windres` utility is used to compile resources. Also, on Windows, `webview.dll` and `WebView2Loader.dll` must be placed into the same directory with your app executable.
+On Windows, you can use a custom icon by providing a resource file, compiling it and linking with it. Typically, `windres` is used to compile resources.
 
-Also, if you want to cross-compile your webview app - use [xgo](https://github.com/karalabe/xgo).
+Also, on Windows, `webview.dll` and `WebView2Loader.dll` must be placed into the same directory with the app executable.
+
+To cross-compile a webview app - use [xgo](https://github.com/karalabe/xgo).
+
+### Known issues
+
+#### Accessing localhost on Windows
+
+If Edge (Chromium) isn't installed on the target machine, webview will use a UWP application context which disallows loopback by default. To enable it you need to run the following command from a command prompt with admin priviledges:
+
+```sh
+CheckNetIsolation.exe LoopbackExempt -a -n="Microsoft.Win32WebViewHost_cw5n1h2txyewy"
+```
+
+For app distribution we recommend automating this in your installer.
 
 ### Migrating from v0.1.1 to v0.10.0
 
@@ -93,18 +121,19 @@ Also, if you want to cross-compile your webview app - use [xgo](https://github.c
 4. `Webview.Loop()` has been removed. Use `Run()` instead.
 5. `WebView.Run()`, `WebView.Terminate()`, `WebView.SetTitle()`, `WebView.Dispatch()` stayed the same.
 6. `WebView.Exit()` has been renamed to `WebView.Destroy()`
-6. `WebView.SetColor()` and `WebView.SetFullScreen()` have been removed. Use `Window()` to get native window handle and probably write some Cgo code to adjust native window to your taste.
-7. `webview.Dialog` has been removed. But it is likely to be brought back as a standalone module.
-8. `WebView.Eval()` remained the same.
-9. `WebView.InjectCSS()` has been removed. Use eval to inject style tag with CSS inside.
-10. `WebView.Bind()` kept the name, but changed the semantics. Only functions can be bound. Not the structs, like in Lorca.
+7. `WebView.SetColor()` and `WebView.SetFullScreen()` have been removed. Use `Window()` to get native window handle and probably write some Cgo code to adjust native window to your taste.
+8. `webview.Dialog` has been removed. But it is likely to be brought back as a standalone module.
+9. `WebView.Eval()` remained the same.
+10. `WebView.InjectCSS()` has been removed. Use eval to inject style tag with CSS inside.
+11. `WebView.Bind()` kept the name, but changed the semantics. Only functions can be bound. Not the structs, like in Lorca.
 
 ## Webview for C/C++ developers
 
-Download [webview.h](https://raw.githubusercontent.com/zserge/webview/master/webview.h) and include it in your C/C++ code:
+Download [webview.h](https://raw.githubusercontent.com/webview/webview/master/webview.h) and include it in your C/C++ code:
 
-### C++:
-```c
+### C++
+
+```c++
 // main.cc
 #include "webview.h"
 #ifdef WIN32
@@ -121,9 +150,10 @@ int main() {
   return 0;
 }
 ```
+
 Build it:
 
-```bash
+```sh
 # Linux
 $ c++ main.cc `pkg-config --cflags --libs gtk+-3.0 webkit2gtk-4.0` -o webview-example
 # MacOS
@@ -132,10 +162,14 @@ $ c++ main.cc -std=c++11 -framework WebKit -o webview-example
 $ c++ main.cc -mwindows -L./dll/x64 -lwebview -lWebView2Loader -o webview-example.exe
 ```
 
-### C:
+### C
+
 ```c
-// main .c
+// main.c
+#define WEBVIEW_HEADER
 #include "webview.h"
+#include <stddef.h>
+
 #ifdef WIN32
 int WINAPI WinMain(HINSTANCE hInt, HINSTANCE hPrevInst, LPSTR lpCmdLine,
                    int nCmdShow) {
@@ -151,20 +185,32 @@ int main() {
 	return 0;
 }
 ```
-Build it:
 
-```bash
+Define C++ flags for the platform:
+
+```sh
 # Linux
-$ g++ main.c `pkg-config --cflags --libs gtk+-3.0 webkit2gtk-4.0` -o webview-example
+$ CPPFLAGS="`pkg-config --cflags --libs gtk+-3.0 webkit2gtk-4.0` -lstdc++"
 # MacOS
-$ g++ main.c -std=c++11 -framework WebKit -o webview-example
+$ CPPFLAGS="-std=c++11 -framework WebKit"
 # Windows (x64)
-$ g++ main.c -mwindows -L./dll/x64 -lwebview -lWebView2Loader -o webview-example.exe
+$ CPPFLAGS="-mwindows -L./dll/x64 -lwebview -lWebView2Loader"
 ```
 
-On Windows it is possible to use webview library directly when compiling with cl.exe, but WebView2Loader.dll is still required. To use MinGW you may dynamically link prebuilt webview.dll (this approach is used in Cgo bindings).
+Build it:
 
-Full C/C++ API is described at the top of the `webview.h` file.
+```sh
+$ g++ -c $CPPFLAGS webview.cc -o webview.o  # build webview
+$ gcc -c main.c -o main.o  # build C program
+$ g++ main.o webview.o $CPPFLAGS -o webview-example  # link them together
+```
+
+For a complete C example see: https://github.com/webview/webview_c
+
+
+On Windows it is possible to use webview library directly when compiling with cl.exe, but WebView2Loader.dll is still required. To use MinGW you may dynamically link the prebuilt webview.dll (this approach is used in Cgo bindings).
+
+Full C/C++ API is described at the top of `webview.h`.
 
 ### Migrating from v0.1.1 to v0.10.0
 
@@ -189,12 +235,13 @@ Full C/C++ API is described at the top of the `webview.h` file.
 
 ## Notes
 
-Execution on OpenBSD requires `wxallowed` [mount(8)](https://man.openbsd.org/mount.8) option.
-For Ubuntu Users run `sudo apt install webkit2gtk-4.0`(Try with webkit2gtk-4.0-dev if webkit2gtk-4.0 is not found) to install webkit2gtk-4.0 related items.
-FreeBSD is also supported, to install webkit2 run `pkg install webkit2-gtk3`.
+- A webview is not a full web browser and thus does not support `alert`, `confirm` and `prompt` dialogs. Additionally, `console.*` methods are not supported.
+- Ubuntu users need to install the `webkit2gtk-4.0` as development dependency via `sudo apt install webkit2gtk-4.0`. If the package can't be found `webkit2gtk-4.0-dev` may be used instead.
+- FreeBSD is also supported via webkit2 which may be installed by running `pkg install webkit2-gtk3`.
+- Execution on OpenBSD requires `wxallowed` [mount(8)](https://man.openbsd.org/mount.8) option.
+- Calling `Eval()` or `Dispatch()` before `Run()` does not work, because the webview instance has only been configured, but not started yet. 
 
 ## License
 
 Code is distributed under MIT license, feel free to use it in your proprietary
 projects as well.
-
