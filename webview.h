@@ -144,27 +144,6 @@ WEBVIEW_API void webview_return(webview_t w, const char *seq, int status,
 namespace webview {
 using dispatch_fn_t = std::function<void()>;
 
-// Convert ASCII hex digit to a nibble (four bits, 0 - 15).
-//
-// Use unsigned to avoid signed overflow UB.
-static inline unsigned char hex2nibble(unsigned char c) {
-  if (c >= '0' && c <= '9') {
-    return c - '0';
-  } else if (c >= 'a' && c <= 'f') {
-    return 10 + (c - 'a');
-  } else if (c >= 'A' && c <= 'F') {
-    return 10 + (c - 'A');
-  }
-  return 0;
-}
-
-// Convert ASCII hex string (two characters) to byte.
-//
-// E.g., "0B" => 0x0B, "af" => 0xAF.
-static inline char hex2char(const char *p) {
-  return hex2nibble(p[0]) * 16 + hex2nibble(p[1]);
-}
-
 inline std::string url_encode(const std::string &s) {
   std::string encoded;
   for (unsigned int i = 0; i < s.length(); i++) {
@@ -178,30 +157,6 @@ inline std::string url_encode(const std::string &s) {
     }
   }
   return encoded;
-}
-
-inline std::string url_decode(const std::string &st) {
-  std::string decoded;
-  const char *s = st.c_str();
-  size_t length = strlen(s);
-  for (unsigned int i = 0; i < length; i++) {
-    if (s[i] == '%') {
-      decoded.push_back(hex2char(s + i + 1));
-      i = i + 2;
-    } else if (s[i] == '+') {
-      decoded.push_back(' ');
-    } else {
-      decoded.push_back(s[i]);
-    }
-  }
-  return decoded;
-}
-
-inline std::string html_from_uri(const std::string &s) {
-  if (s.substr(0, 15) == "data:text/html,") {
-    return url_decode(s.substr(15));
-  }
-  return "";
 }
 
 inline int json_parse_c(const char *s, size_t sz, const char *key, size_t keysz,
@@ -470,20 +425,7 @@ public:
                      G_CALLBACK(+[](WebKitUserContentManager *,
                                     WebKitJavascriptResult *r, gpointer arg) {
                        auto *w = static_cast<gtk_webkit_engine *>(arg);
-#if WEBKIT_MAJOR_VERSION >= 2 && WEBKIT_MINOR_VERSION >= 22
-                       JSCValue *value =
-                           webkit_javascript_result_get_js_value(r);
-                       char *s = jsc_value_to_string(value);
-#else
-                       JSGlobalContextRef ctx =
-                           webkit_javascript_result_get_global_context(r);
-                       JSValueRef value = webkit_javascript_result_get_value(r);
-                       JSStringRef js = JSValueToStringCopy(ctx, value, NULL);
-                       size_t n = JSStringGetMaximumUTF8CStringSize(js);
-                       char *s = g_new(char, n);
-                       JSStringGetUTF8CString(js, s, n);
-                       JSStringRelease(js);
-#endif
+                       char *s = get_string_from_js_result(r);
                        w->on_message(s);
                        g_free(s);
                      }),
@@ -507,6 +449,7 @@ public:
 
     gtk_widget_show_all(m_window);
   }
+  virtual ~gtk_webkit_engine() = default;
   void *window() { return (void *)m_window; }
   void run() { gtk_main(); }
   void terminate() { gtk_main_quit(); }
@@ -564,6 +507,24 @@ public:
 
 private:
   virtual void on_message(const std::string &msg) = 0;
+
+  static char *get_string_from_js_result(WebKitJavascriptResult *r) {
+    char *s;
+#if WEBKIT_MAJOR_VERSION >= 2 && WEBKIT_MINOR_VERSION >= 22
+    JSCValue *value = webkit_javascript_result_get_js_value(r);
+    s = jsc_value_to_string(value);
+#else
+    JSGlobalContextRef ctx = webkit_javascript_result_get_global_context(r);
+    JSValueRef value = webkit_javascript_result_get_value(r);
+    JSStringRef js = JSValueToStringCopy(ctx, value, NULL);
+    size_t n = JSStringGetMaximumUTF8CStringSize(js);
+    s = g_new(char, n);
+    JSStringGetUTF8CString(js, s, n);
+    JSStringRelease(js);
+#endif
+    return s;
+  }
+
   GtkWidget *m_window;
   GtkWidget *m_webview;
 };
@@ -717,7 +678,7 @@ public:
     ((void (*)(id, SEL, id))objc_msgSend)(m_window, "makeKeyAndOrderFront:"_sel,
                                           nullptr);
   }
-  ~cocoa_wkwebview_engine() { close(); }
+  virtual ~cocoa_wkwebview_engine() { close(); }
   void *window() { return (void *)m_window; }
   void terminate() {
     close();
@@ -917,6 +878,8 @@ public:
     resize(m_window);
     m_controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
   }
+
+  virtual ~win32_edge_engine() = default;
 
   void run() {
     MSG msg;
@@ -1126,8 +1089,7 @@ public:
 
   void navigate(const std::string &url) {
     if (url == "") {
-      browser_engine::navigate("data:text/html," +
-                               url_encode("<html><body></body></html>"));
+      browser_engine::navigate("about:blank");
       return;
     }
     browser_engine::navigate(url);
@@ -1186,7 +1148,7 @@ public:
   }
 
   void resolve(const std::string &seq, int status, const std::string &result) {
-    dispatch([=]() {
+    dispatch([seq, status, result, this]() {
       if (status == 0) {
         eval("window._rpc[" + seq + "].resolve(" + result +
              "); delete window._rpc[" + seq + "]");
