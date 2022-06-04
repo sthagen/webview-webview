@@ -118,7 +118,6 @@ WEBVIEW_API void webview_return(webview_t w, const char *seq, int status,
 
 #ifdef __cplusplus
 }
-#endif
 
 #ifndef WEBVIEW_HEADER
 
@@ -643,10 +642,11 @@ public:
     // Main window
     if (window == nullptr) {
       m_window = ((id(*)(id, SEL))objc_msgSend)("NSWindow"_cls, "alloc"_sel);
+      unsigned int style = NSWindowStyleMaskTitled;
       m_window =
           ((id(*)(id, SEL, CGRect, int, unsigned long, int))objc_msgSend)(
               m_window, "initWithContentRect:styleMask:backing:defer:"_sel,
-              CGRectMake(0, 0, 0, 0), 0, NSBackingStoreBuffered, 0);
+              CGRectMake(0, 0, 0, 0), style, NSBackingStoreBuffered, 0);
     } else {
       m_window = (id)window;
     }
@@ -1049,7 +1049,21 @@ public:
     m_controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
   }
 
-  virtual ~win32_edge_engine() = default;
+  virtual ~win32_edge_engine() {
+    if (m_webview) {
+      m_webview->Release();
+      m_webview = nullptr;
+    }
+    if (m_controller) {
+      m_controller->Release();
+      m_controller = nullptr;
+    }
+  }
+
+  win32_edge_engine(const win32_edge_engine &other) = delete;
+  win32_edge_engine &operator=(const win32_edge_engine &other) = delete;
+  win32_edge_engine(win32_edge_engine &&other) = delete;
+  win32_edge_engine &operator=(win32_edge_engine &&other) = delete;
 
   void run() {
     MSG msg;
@@ -1142,15 +1156,17 @@ private:
     wchar_t userDataFolder[MAX_PATH];
     PathCombineW(userDataFolder, dataPath, currentExeName);
 
+    auto handler = new webview2_com_handler(
+        wnd, cb,
+        [&](ICoreWebView2Controller *controller, ICoreWebView2 *webview) {
+          controller->AddRef();
+          webview->AddRef();
+          m_controller = controller;
+          m_webview = webview;
+          flag.clear();
+        });
     HRESULT res = CreateCoreWebView2EnvironmentWithOptions(
-        nullptr, userDataFolder, nullptr,
-        new webview2_com_handler(wnd, cb,
-                                 [&](ICoreWebView2Controller *controller) {
-                                   m_controller = controller;
-                                   m_controller->get_CoreWebView2(&m_webview);
-                                   m_webview->AddRef();
-                                   flag.clear();
-                                 }));
+        nullptr, userDataFolder, nullptr, handler);
     if (res != S_OK) {
       return false;
     }
@@ -1187,14 +1203,27 @@ private:
         public ICoreWebView2WebMessageReceivedEventHandler,
         public ICoreWebView2PermissionRequestedEventHandler {
     using webview2_com_handler_cb_t =
-        std::function<void(ICoreWebView2Controller *)>;
+        std::function<void(ICoreWebView2Controller *, ICoreWebView2 *webview)>;
 
   public:
     webview2_com_handler(HWND hwnd, msg_cb_t msgCb,
                          webview2_com_handler_cb_t cb)
         : m_window(hwnd), m_msgCb(msgCb), m_cb(cb) {}
-    ULONG STDMETHODCALLTYPE AddRef() { return 1; }
-    ULONG STDMETHODCALLTYPE Release() { return 1; }
+
+    virtual ~webview2_com_handler() = default;
+    webview2_com_handler(const webview2_com_handler &other) = delete;
+    webview2_com_handler &operator=(const webview2_com_handler &other) = delete;
+    webview2_com_handler(webview2_com_handler &&other) = delete;
+    webview2_com_handler &operator=(webview2_com_handler &&other) = delete;
+
+    ULONG STDMETHODCALLTYPE AddRef() { return ++m_ref_count; }
+    ULONG STDMETHODCALLTYPE Release() {
+      if (m_ref_count > 1) {
+        return --m_ref_count;
+      }
+      delete this;
+      return 0;
+    }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, LPVOID *ppv) {
       return S_OK;
     }
@@ -1205,15 +1234,13 @@ private:
     }
     HRESULT STDMETHODCALLTYPE Invoke(HRESULT res,
                                      ICoreWebView2Controller *controller) {
-      controller->AddRef();
-
       ICoreWebView2 *webview;
       ::EventRegistrationToken token;
       controller->get_CoreWebView2(&webview);
       webview->add_WebMessageReceived(this, &token);
       webview->add_PermissionRequested(this, &token);
 
-      m_cb(controller);
+      m_cb(controller, webview);
       return S_OK;
     }
     HRESULT STDMETHODCALLTYPE Invoke(
@@ -1241,6 +1268,7 @@ private:
     HWND m_window;
     msg_cb_t m_msgCb;
     webview2_com_handler_cb_t m_cb;
+    std::atomic<ULONG> m_ref_count = 0;
   };
 };
 
@@ -1423,5 +1451,5 @@ WEBVIEW_API void webview_return(webview_t w, const char *seq, int status,
 }
 
 #endif /* WEBVIEW_HEADER */
-
+#endif /* __cplusplus */
 #endif /* WEBVIEW_H */
