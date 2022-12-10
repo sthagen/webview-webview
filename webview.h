@@ -29,6 +29,66 @@
 #define WEBVIEW_API extern
 #endif
 
+#ifndef WEBVIEW_VERSION_MAJOR
+// The current library major version.
+#define WEBVIEW_VERSION_MAJOR 0
+#endif
+
+#ifndef WEBVIEW_VERSION_MINOR
+// The current library minor version.
+#define WEBVIEW_VERSION_MINOR 10
+#endif
+
+#ifndef WEBVIEW_VERSION_PATCH
+// The current library patch version.
+#define WEBVIEW_VERSION_PATCH 0
+#endif
+
+#ifndef WEBVIEW_VERSION_PRE_RELEASE
+// SemVer 2.0.0 pre-release labels prefixed with "-".
+#define WEBVIEW_VERSION_PRE_RELEASE ""
+#endif
+
+#ifndef WEBVIEW_VERSION_BUILD_METADATA
+// SemVer 2.0.0 build metadata prefixed with "+".
+#define WEBVIEW_VERSION_BUILD_METADATA ""
+#endif
+
+// Utility macro for stringifying a macro argument.
+#define WEBVIEW_STRINGIFY(x) #x
+
+// Utility macro for stringifying the result of a macro argument expansion.
+#define WEBVIEW_EXPAND_AND_STRINGIFY(x) WEBVIEW_STRINGIFY(x)
+
+// SemVer 2.0.0 version number in MAJOR.MINOR.PATCH format.
+#define WEBVIEW_VERSION_NUMBER                                                 \
+  WEBVIEW_EXPAND_AND_STRINGIFY(WEBVIEW_VERSION_MAJOR)                          \
+  "." WEBVIEW_EXPAND_AND_STRINGIFY(                                            \
+      WEBVIEW_VERSION_MINOR) "." WEBVIEW_EXPAND_AND_STRINGIFY(WEBVIEW_VERSION_PATCH)
+
+// Holds the elements of a MAJOR.MINOR.PATCH version number.
+typedef struct {
+  // Major version.
+  unsigned int major;
+  // Minor version.
+  unsigned int minor;
+  // Patch version.
+  unsigned int patch;
+} webview_version_t;
+
+// Holds the library's version information.
+typedef struct {
+  // The elements of the version number.
+  webview_version_t version;
+  // SemVer 2.0.0 version number in MAJOR.MINOR.PATCH format.
+  const char version_number[32];
+  // SemVer 2.0.0 pre-release labels prefixed with "-" if specified, otherwise
+  // an empty string.
+  const char pre_release[48];
+  // SemVer 2.0.0 build metadata prefixed with "+", otherwise an empty string.
+  const char build_metadata[48];
+} webview_version_info_t;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -119,6 +179,10 @@ WEBVIEW_API void webview_unbind(webview_t w, const char *name);
 WEBVIEW_API void webview_return(webview_t w, const char *seq, int status,
                                 const char *result);
 
+// Get the library's version information.
+// @since 0.10
+WEBVIEW_API const webview_version_info_t *webview_version();
+
 #ifdef __cplusplus
 }
 
@@ -167,6 +231,13 @@ namespace webview {
 using dispatch_fn_t = std::function<void()>;
 
 namespace detail {
+
+// The library's version information.
+constexpr const webview_version_info_t library_version_info{
+    {WEBVIEW_VERSION_MAJOR, WEBVIEW_VERSION_MINOR, WEBVIEW_VERSION_PATCH},
+    WEBVIEW_VERSION_NUMBER,
+    WEBVIEW_VERSION_PRE_RELEASE,
+    WEBVIEW_VERSION_BUILD_METADATA};
 
 inline int json_parse_c(const char *s, size_t sz, const char *key, size_t keysz,
                         const char **value, size_t *valuesz) {
@@ -853,7 +924,7 @@ private:
         objc::msg_send<BOOL>(bundle_path, "hasSuffix:"_sel, ".app"_str);
     return !!bundled;
   }
-  void on_application_did_finish_launching(id delegate, id app) {
+  void on_application_did_finish_launching(id /*delegate*/, id app) {
     // See comments related to application lifecycle in create_app_delegate().
     if (!m_parent_window) {
       // Stop the main run loop so that we can return
@@ -933,13 +1004,13 @@ private:
     objc::msg_send<void>(m_manager, "addScriptMessageHandler:name:"_sel,
                          script_message_handler, "external"_str);
 
-    init(R"script(
+    init(R""(
       window.external = {
         invoke: function(s) {
           window.webkit.messageHandlers.external.postMessage(s);
         },
       };
-      )script");
+      )"");
     objc::msg_send<void>(m_window, "setContentView:"_sel, m_webview);
     objc::msg_send<void>(m_window, "makeKeyAndOrderFront:"_sel, nullptr);
   }
@@ -1513,71 +1584,30 @@ public:
   using binding_t = std::function<void(std::string, std::string, void *)>;
   class binding_ctx_t {
   public:
-    binding_ctx_t(binding_t *callback, void *arg, bool sync = true)
-        : callback(callback), arg(arg), sync(sync) {}
+    binding_ctx_t(binding_t callback, void *arg)
+        : callback(callback), arg(arg) {}
     // This function is called upon execution of the bound JS function
-    binding_t *callback;
+    binding_t callback;
     // This user-supplied argument is passed to the callback
     void *arg;
-    // This boolean expresses whether or not this binding is synchronous or asynchronous
-    // Async bindings require the user to call the resolve function, sync bindings don't
-    bool sync;
   };
 
   using sync_binding_t = std::function<std::string(std::string)>;
-  using sync_binding_ctx_t = std::pair<webview *, sync_binding_t>;
 
   // Synchronous bind
   void bind(const std::string &name, sync_binding_t fn) {
-    if (bindings.count(name) == 0) {
-      bindings[name] = new binding_ctx_t(
-          new binding_t(
-              [](const std::string &seq, const std::string &req, void *arg) {
-                auto pair = static_cast<sync_binding_ctx_t *>(arg);
-                pair->first->resolve(seq, 0, pair->second(req));
-              }),
-          new sync_binding_ctx_t(this, fn));
-      bind_js(name);
-    }
+    auto wrapper = [this, fn](const std::string &seq, const std::string &req,
+                              void * /*arg*/) { resolve(seq, 0, fn(req)); };
+    bind(name, wrapper, nullptr);
   }
 
   // Asynchronous bind
-  void bind(const std::string &name, binding_t f, void *arg) {
-    if (bindings.count(name) == 0) {
-      bindings[name] = new binding_ctx_t(new binding_t(f), arg, false);
-      bind_js(name);
+  void bind(const std::string &name, binding_t fn, void *arg) {
+    if (bindings.count(name) > 0) {
+      return;
     }
-  }
-
-  void unbind(const std::string &name) {
-    if (bindings.find(name) != bindings.end()) {
-      auto js = "delete window['" + name + "'];";
-      init(js);
-      eval(js);
-      delete bindings[name]->callback;
-      if (bindings[name]->sync) {
-        delete static_cast<sync_binding_ctx_t *>(bindings[name]->arg);
-      }
-      delete bindings[name];
-      bindings.erase(name);
-    }
-  }
-
-  void resolve(const std::string &seq, int status, const std::string &result) {
-    dispatch([seq, status, result, this]() {
-      if (status == 0) {
-        eval("window._rpc[" + seq + "].resolve(" + result +
-             "); delete window._rpc[" + seq + "]");
-      } else {
-        eval("window._rpc[" + seq + "].reject(" + result +
-             "); delete window._rpc[" + seq + "]");
-      }
-    });
-  }
-
-private:
-  void bind_js(const std::string &name) {
-    auto js = "(function() { var name = '" + name + "';" + R"(
+    bindings.emplace(name, binding_ctx_t(fn, arg));
+    auto js = "(function() { var name = '" + name + "';" + R""(
       var RPC = window._rpc = (window._rpc || {nextSeq: 1});
       window[name] = function() {
         var seq = RPC.nextSeq++;
@@ -1594,23 +1624,47 @@ private:
         }));
         return promise;
       }
-    })())";
+    })())"";
     init(js);
     eval(js);
   }
 
+  void unbind(const std::string &name) {
+    auto found = bindings.find(name);
+    if (found != bindings.end()) {
+      auto js = "delete window['" + name + "'];";
+      init(js);
+      eval(js);
+      bindings.erase(found);
+    }
+  }
+
+  void resolve(const std::string &seq, int status, const std::string &result) {
+    dispatch([seq, status, result, this]() {
+      if (status == 0) {
+        eval("window._rpc[" + seq + "].resolve(" + result +
+             "); delete window._rpc[" + seq + "]");
+      } else {
+        eval("window._rpc[" + seq + "].reject(" + result +
+             "); delete window._rpc[" + seq + "]");
+      }
+    });
+  }
+
+private:
   void on_message(const std::string &msg) {
     auto seq = detail::json_parse(msg, "id", 0);
     auto name = detail::json_parse(msg, "method", 0);
     auto args = detail::json_parse(msg, "params", 0);
-    if (bindings.find(name) == bindings.end()) {
+    auto found = bindings.find(name);
+    if (found == bindings.end()) {
       return;
     }
-    auto fn = bindings[name];
-    (*fn->callback)(seq, args, fn->arg);
+    const auto &context = found->second;
+    context.callback(seq, args, context.arg);
   }
 
-  std::map<std::string, binding_ctx_t *> bindings;
+  std::map<std::string, binding_ctx_t> bindings;
 };
 } // namespace webview
 
@@ -1688,6 +1742,10 @@ WEBVIEW_API void webview_unbind(webview_t w, const char *name) {
 WEBVIEW_API void webview_return(webview_t w, const char *seq, int status,
                                 const char *result) {
   static_cast<webview::webview *>(w)->resolve(seq, status, result);
+}
+
+WEBVIEW_API const webview_version_info_t *webview_version() {
+  return &webview::detail::library_version_info;
 }
 
 #endif /* WEBVIEW_HEADER */
