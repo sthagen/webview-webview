@@ -683,6 +683,28 @@ Result msg_send(Args... args) noexcept {
   return invoke<Result>(objc_msgSend, args...);
 }
 
+// Wrapper around NSAutoreleasePool that drains the pool on destruction.
+class autoreleasepool {
+public:
+  autoreleasepool()
+      : m_pool(msg_send<id>(objc_getClass("NSAutoreleasePool"),
+                            sel_registerName("new"))) {}
+
+  ~autoreleasepool() {
+    if (m_pool) {
+      msg_send<void>(m_pool, sel_registerName("drain"));
+    }
+  }
+
+  autoreleasepool(const autoreleasepool &) = delete;
+  autoreleasepool &operator=(const autoreleasepool &) = delete;
+  autoreleasepool(autoreleasepool &&) = delete;
+  autoreleasepool &operator=(autoreleasepool &&) = delete;
+
+private:
+  id m_pool{};
+};
+
 } // namespace objc
 
 enum NSBackingStoreType : NSUInteger { NSBackingStoreBuffered = 2 };
@@ -784,6 +806,8 @@ public:
     objc::msg_send<void>(m_window, "center"_sel);
   }
   void navigate(const std::string &url) {
+    objc::autoreleasepool pool;
+
     auto nsurl = objc::msg_send<id>(
         "NSURL"_cls, "URLWithString:"_sel,
         objc::msg_send<id>("NSString"_cls, "stringWithUTF8String:"_sel,
@@ -794,6 +818,7 @@ public:
         objc::msg_send<id>("NSURLRequest"_cls, "requestWithURL:"_sel, nsurl));
   }
   void set_html(const std::string &html) {
+    objc::autoreleasepool pool;
     objc::msg_send<void>(m_webview, "loadHTMLString:baseURL:"_sel,
                          objc::msg_send<id>("NSString"_cls,
                                             "stringWithUTF8String:"_sel,
@@ -1009,6 +1034,29 @@ private:
     objc::msg_send<void>(m_webview, "initWithFrame:configuration:"_sel,
                          CGRectMake(0, 0, 0, 0), config);
     objc::msg_send<void>(m_webview, "setUIDelegate:"_sel, ui_delegate);
+
+    if (m_debug) {
+      // Explicitly make WKWebView inspectable via Safari on OS versions that
+      // disable the feature by default (macOS 13.3 and later) and support
+      // enabling it. According to Apple, the behavior on older OS versions is
+      // for content to always be inspectable in "debug builds".
+      // Testing shows that this is true for macOS 12.6 but somehow not 10.15.
+      // https://webkit.org/blog/13936/enabling-the-inspection-of-web-content-in-apps/
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_available)
+      if (__builtin_available(macOS 13.3, iOS 16.4, tvOS 16.4, *)) {
+        objc::msg_send<void>(
+            m_webview, "setInspectable:"_sel,
+            objc::msg_send<id>("NSNumber"_cls, "numberWithBool:"_sel, YES));
+      }
+#else
+#error __builtin_available not supported by compiler
+#endif
+#else
+#error __has_builtin not supported by compiler
+#endif
+    }
+
     auto script_message_handler = create_script_message_handler();
     objc::msg_send<void>(m_manager, "addScriptMessageHandler:name:"_sel,
                          script_message_handler, "external"_str);
