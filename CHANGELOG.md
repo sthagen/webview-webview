@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New compile-time options for controlling `WEBVIEW_API` ([#893](https://github.com/webview/webview/pull/893))
+
+### Fixed
+
+- Treat result of binding function as JSON, not JS ([#1002](https://github.com/webview/webview/pull/1002))
+
+### Changed
+
+- `WEBVIEW_API` is now `inline` by default for C++ ([#893](https://github.com/webview/webview/pull/893))
+
+## [0.10.0] - 2023-09-16
+
 This is the first release since the library rewrite by [zserge](https://github.com/zserge) ([#315](https://github.com/webview/webview/pull/315)), and is a necessary one that allows us to prepare for future changes in the library.
 
 Due to the vast amount of contributions that are in this release on top of the changes and removals introduced in the library rewrite, we've picked a few contributions aside from the rewrite that had a significant impact compared to the previous release.
@@ -29,6 +43,7 @@ Windows:
 
 ## [0.1.0] - 2018-05-09
 
-[unreleased]: https://github.com/webview/webview/compare/0.1.1...HEAD
+[unreleased]: https://github.com/webview/webview/compare/0.10.0...HEAD
+[0.10.0]:     https://github.com/webview/webview/compare/0.1.1...0.10.0
 [0.1.1]:      https://github.com/webview/webview/compare/0.1.0...0.1.1
 [0.1.0]:      https://github.com/webview/webview/releases/tag/0.1.0
