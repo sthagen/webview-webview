@@ -109,14 +109,17 @@ extern "C" {
 
 typedef void *webview_t;
 
-// Creates a new webview instance. If debug is non-zero - developer tools will
-// be enabled (if the platform supports them). The window parameter can be a
-// pointer to the native window handle. If it's non-null - then child WebView
-// is embedded into the given parent window. Otherwise a new window is created.
-// Depending on the platform, a GtkWindow, NSWindow or HWND pointer can be
-// passed here. Returns null on failure. Creation can fail for various reasons
-// such as when required runtime dependencies are missing or when window creation
-// fails.
+// Creates a new webview instance. If the debug parameter is non-zero,
+// developer tools are enabled if supported by the backend. The optional window
+// parameter can be a native window handle, i.e. GtkWindow pointer (GTK),
+// NSWindow pointer (Cocoa) or HWND (Win32). If the window handle is
+// non-null, the webview widget is embedded into the given window;
+// otherwise, a new window is created.
+// Returns null on failure. Creation can fail for various reasons such as when
+// required runtime dependencies are missing or when window creation fails.
+// Remarks:
+// - Win32: The function also accepts a pointer to HWND (Win32) in the window
+//   parameter for backward compatibility.
 WEBVIEW_API webview_t webview_create(int debug, void *window);
 
 // Destroys a webview and closes the native window.
@@ -135,9 +138,9 @@ WEBVIEW_API void webview_terminate(webview_t w);
 WEBVIEW_API void
 webview_dispatch(webview_t w, void (*fn)(webview_t w, void *arg), void *arg);
 
-// Returns a native window handle pointer. When using a GTK backend the pointer
-// is a GtkWindow pointer, when using a Cocoa backend the pointer is a NSWindow
-// pointer, when using a Win32 backend the pointer is a HWND pointer.
+// Returns the native handle of the window associated with the webview instance.
+// The handle can be a GtkWindow pointer (GTK), NSWindow pointer (Cocoa) or
+// HWND (Win32).
 WEBVIEW_API void *webview_get_window(webview_t w);
 
 // Updates the title of the native window. Must be called from the UI thread.
@@ -466,10 +469,9 @@ constexpr bool is_json_special_char(char c) {
 constexpr bool is_ascii_control_char(char c) { return c >= 0 && c <= 0x1f; }
 
 inline std::string json_escape(const std::string &s, bool add_quotes = true) {
-  constexpr char hex_alphabet[]{"0123456789abcdef"};
   // Calculate the size of the resulting string.
   // Add space for the double quotes.
-  auto required_length = add_quotes ? 2 : 0;
+  size_t required_length = add_quotes ? 2 : 0;
   for (auto c : s) {
     if (is_json_special_char(c)) {
       // '\' and a single following character
@@ -2584,6 +2586,11 @@ public:
           }
           break;
         }
+        case WM_ACTIVATE:
+          if (LOWORD(wp) != WA_INACTIVE) {
+            w->focus_widget();
+          }
+          break;
         default:
           return DefWindowProcW(hwnd, msg, wp, lp);
         }
@@ -2603,7 +2610,9 @@ public:
       constexpr const int initial_height = 480;
       set_size(initial_width, initial_height, WEBVIEW_HINT_NONE);
     } else {
-      m_window = *(static_cast<HWND *>(window));
+      m_window = IsWindow(static_cast<HWND>(window))
+                     ? static_cast<HWND>(window)
+                     : *(static_cast<HWND *>(window));
       m_dpi = get_window_dpi(m_window);
     }
 
@@ -2819,6 +2828,12 @@ private:
     RECT bounds;
     GetClientRect(m_window, &bounds);
     m_controller->put_Bounds(bounds);
+  }
+
+  void focus_widget() {
+    if (m_controller) {
+      m_controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+    }
   }
 
   bool is_webview2_available() const noexcept {
