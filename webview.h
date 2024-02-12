@@ -113,13 +113,20 @@ typedef void *webview_t;
 // developer tools are enabled if supported by the backend. The optional window
 // parameter can be a native window handle, i.e. GtkWindow pointer (GTK),
 // NSWindow pointer (Cocoa) or HWND (Win32). If the window handle is
-// non-null, the webview widget is embedded into the given window;
-// otherwise, a new window is created.
-// Returns null on failure. Creation can fail for various reasons such as when
-// required runtime dependencies are missing or when window creation fails.
+// non-null, the webview widget is embedded into the given window, and the
+// caller is expected to assume responsibility for the window as well as
+// application lifecycle. If the window handle is null, a new window is created
+// and both the window and application lifecycle are managed by the webview
+// instance. Returns null on failure. Creation can fail for various reasons such
+// as when required runtime dependencies are missing or when window creation
+// fails.
 // Remarks:
 // - Win32: The function also accepts a pointer to HWND (Win32) in the window
 //   parameter for backward compatibility.
+// - Win32/WebView2: CoInitializeEx should be called with
+//   COINIT_APARTMENTTHREADED before attempting to call this function with an
+//   existing window. Omitting this step may cause WebView2 initialization to
+//   fail.
 WEBVIEW_API webview_t webview_create(int debug, void *window);
 
 // Destroys a webview and closes the native window.
@@ -142,6 +149,22 @@ webview_dispatch(webview_t w, void (*fn)(webview_t w, void *arg), void *arg);
 // The handle can be a GtkWindow pointer (GTK), NSWindow pointer (Cocoa) or
 // HWND (Win32).
 WEBVIEW_API void *webview_get_window(webview_t w);
+
+// Native handle kind. The actual type depends on the backend.
+typedef enum {
+  // Top-level window. GtkWindow pointer (GTK), NSWindow pointer (Cocoa) or HWND (Win32).
+  WEBVIEW_NATIVE_HANDLE_KIND_UI_WINDOW,
+  // Browser widget. GtkWidget pointer (GTK), NSView pointer (Cocoa) or HWND (Win32).
+  WEBVIEW_NATIVE_HANDLE_KIND_UI_WIDGET,
+  // Browser controller. WebKitWebView pointer (WebKitGTK), WKWebView pointer (Cocoa/WebKit) or
+  // ICoreWebView2Controller pointer (Win32/WebView2).
+  WEBVIEW_NATIVE_HANDLE_KIND_BROWSER_CONTROLLER
+} webview_native_handle_kind_t;
+
+// Returns a native handle of choice.
+// @since 0.11
+WEBVIEW_API void *webview_get_native_handle(webview_t w,
+                                            webview_native_handle_kind_t kind);
 
 // Updates the title of the native window. Must be called from the UI thread.
 WEBVIEW_API void webview_set_title(webview_t w, const char *title);
@@ -947,6 +970,8 @@ public:
   }
   virtual ~gtk_webkit_engine() = default;
   void *window() { return (void *)m_window; }
+  void *widget() { return (void *)m_webview; }
+  void *browser_controller() { return (void *)m_webview; };
   void run() { gtk_main(); }
   void terminate() { gtk_main_quit(); }
   void dispatch(std::function<void()> f) {
@@ -1211,6 +1236,8 @@ public:
   }
   virtual ~cocoa_wkwebview_engine() = default;
   void *window() { return (void *)m_window; }
+  void *widget() { return (void *)m_webview; }
+  void *browser_controller() { return (void *)m_webview; }
   void terminate() { stop_run_loop(); }
   void run() {
     auto app = get_shared_application();
@@ -2496,14 +2523,14 @@ private:
 
 class win32_edge_engine {
 public:
-  win32_edge_engine(bool debug, void *window) {
+  win32_edge_engine(bool debug, void *window) : m_owns_window{!window} {
     if (!is_webview2_available()) {
       return;
     }
 
     HINSTANCE hInstance = GetModuleHandle(nullptr);
 
-    if (!window) {
+    if (m_owns_window) {
       m_com_init = {COINIT_APARTMENTTHREADED};
       if (!m_com_init.is_initialized()) {
         return;
@@ -2699,9 +2726,11 @@ public:
     CreateWindowExW(0, L"webview_message", nullptr, 0, 0, 0, 0, 0, HWND_MESSAGE,
                     nullptr, hInstance, this);
 
-    ShowWindow(m_window, SW_SHOW);
-    UpdateWindow(m_window);
-    SetFocus(m_window);
+    if (m_owns_window) {
+      ShowWindow(m_window, SW_SHOW);
+      UpdateWindow(m_window);
+      SetFocus(m_window);
+    }
 
     auto cb =
         std::bind(&win32_edge_engine::on_message, this, std::placeholders::_1);
@@ -2730,14 +2759,27 @@ public:
   win32_edge_engine &operator=(win32_edge_engine &&other) = delete;
 
   void run() {
+    m_running_main_loop = true;
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
       TranslateMessage(&msg);
       DispatchMessageW(&msg);
     }
+    m_running_main_loop = false;
   }
   void *window() { return (void *)m_window; }
-  void terminate() { PostQuitMessage(0); }
+  void *widget() { return (void *)m_widget; }
+  void *browser_controller() { return (void *)m_controller; }
+  void terminate() {
+    // Prevent unintentionally posting the quit message multiple times in the
+    // following scenario:
+    // 1. Run loop starts.
+    // 2. User code requests the run loop to stop.
+    // 3. Destructor of this class wants to stop the run loop.
+    if (m_running_main_loop) {
+      PostQuitMessage(0);
+    }
+  }
   void dispatch(dispatch_fn_t f) {
     PostMessageW(m_message_window, WM_APP, 0, (LPARAM) new dispatch_fn_t(f));
   }
@@ -2831,13 +2873,20 @@ private:
     m_com_handler->try_create_environment();
 
     // Pump the message loop until WebView2 has finished initialization.
+    m_running_main_loop = true;
+    bool got_quit_msg = false;
     MSG msg;
     while (flag.test_and_set() && GetMessageW(&msg, nullptr, 0, 0) >= 0) {
       if (msg.message == WM_QUIT) {
-        return false;
+        got_quit_msg = true;
+        break;
       }
       TranslateMessage(&msg);
       DispatchMessageW(&msg);
+    }
+    m_running_main_loop = false;
+    if (got_quit_msg) {
+      return false;
     }
     if (!m_controller || !m_webview) {
       return false;
@@ -2860,7 +2909,9 @@ private:
     m_controller->put_IsVisible(TRUE);
     ShowWindow(m_widget, SW_SHOW);
     UpdateWindow(m_widget);
-    focus_webview();
+    if (m_owns_window) {
+      focus_webview();
+    }
     return true;
   }
 
@@ -2963,6 +3014,8 @@ private:
   webview2_com_handler *m_com_handler = nullptr;
   mswebview2::loader m_webview2_loader;
   int m_dpi{};
+  bool m_owns_window{};
+  bool m_running_main_loop{};
 };
 
 } // namespace detail
@@ -3127,6 +3180,21 @@ WEBVIEW_API void webview_dispatch(webview_t w, void (*fn)(webview_t, void *),
 
 WEBVIEW_API void *webview_get_window(webview_t w) {
   return static_cast<webview::webview *>(w)->window();
+}
+
+WEBVIEW_API void *webview_get_native_handle(webview_t w,
+                                            webview_native_handle_kind_t kind) {
+  auto *w_ = static_cast<webview::webview *>(w);
+  switch (kind) {
+  case WEBVIEW_NATIVE_HANDLE_KIND_UI_WINDOW:
+    return w_->window();
+  case WEBVIEW_NATIVE_HANDLE_KIND_UI_WIDGET:
+    return w_->widget();
+  case WEBVIEW_NATIVE_HANDLE_KIND_BROWSER_CONTROLLER:
+    return w_->browser_controller();
+  default:
+    return nullptr;
+  }
 }
 
 WEBVIEW_API void webview_set_title(webview_t w, const char *title) {
