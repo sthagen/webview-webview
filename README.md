@@ -26,7 +26,7 @@ The most up-to-date documentation is right in the source code. Improving the doc
 
 ## Prerequisites
 
-Your compiler must support minimum C++11 except for platforms that require a more modern version.
+Your compiler must support minimum C++11.
 
 This project uses CMake and Ninja, and while recommended for your convenience, these tools aren't required for using the library.
 
@@ -223,10 +223,10 @@ An amalgamated library can be built when building the project using CMake, or th
 The latter is described below.
 
 ```sh
-python3 scripts/amalgamate.py --output webview_amalgamation.h core/include/webview/webview.h
+python3 scripts/amalgamate/amalgamate.py --base core --search include --output webview_amalgamation.h src
 ```
 
-See `python3 scripts/amalgamate.py --help` for script usage.
+See `python3 scripts/amalgamate/amalgamate.py --help` for script usage.
 
 ### Non-CMake Usage
 
@@ -475,6 +475,7 @@ Ruby        | [Maaarcocr/webview_ruby](https://github.com/Maaarcocr/webview_ruby
 Rust        | [Boscop/web-view](https://github.com/Boscop/web-view)
 Swift       | [jakenvac/SwiftWebview](https://github.com/jakenvac/SwiftWebview)
 V           | [malisipi/mui](https://github.com/malisipi/mui/tree/main/webview), [ttytm/webview](https://github.com/ttytm/webview)
+Vala        | [taozuhong/webview-vala](https://github.com/taozuhong/webview-vala)
 Zig         | [thechampagne/webview-zig](https://github.com/thechampagne/webview-zig)
 
 If you wish to add bindings to the list, feel free to submit a pull request or [open an issue][issues-new].
